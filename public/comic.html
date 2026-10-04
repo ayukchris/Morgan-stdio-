@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comic · Morgan.stdio</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav id="nav"></nav>
+<main class="wrap" id="main"><div class="spinner" style="margin:8rem auto"></div></main>
+<footer id="footer"></footer>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  const user = await boot();
+  const main = document.getElementById('main');
+  try {
+    const c = await api('/api/comics/' + encodeURIComponent(qs('id')));
+    document.title = c.title + ' · Morgan.stdio';
+    const first = c.chapters[0];
+    const newest = c.chapters[c.chapters.length - 1];
+    const locked = c.chapters.some(ch => ch.locked);
+    main.innerHTML = `
+      <div class="detail">
+        ${coverDiv('cover', c.cover, c.title)}
+        <div>
+          ${c.genre ? `<span class="mini lock" style="margin:0 0 .8rem;display:inline-block">${esc(c.genre)}</span>` : ''}
+          <h1 class="display">${esc(c.title)}</h1>
+          <p class="muted" style="margin:.4rem 0 1rem">${c.chapters.length} chapter${c.chapters.length === 1 ? '' : 's'} · Updated ${ago(c.latestAt)}</p>
+          <p style="max-width:680px;margin-bottom:1.5rem;white-space:pre-line">${esc(c.description) || '<span class="muted">No description yet.</span>'}</p>
+          <div style="display:flex;gap:.8rem;flex-wrap:wrap">
+            ${first ? `<a class="btn" href="/read?id=${first.id}">▶ Start Reading</a>` : ''}
+            ${newest && newest !== first ? `<a class="btn ghost" href="/read?id=${newest.id}">Latest: Ch. ${newest.number}</a>` : ''}
+          </div>
+          ${locked && !user ? `<p class="notice" style="margin-top:1.3rem">🔒 Some chapters are for members only. <a href="/login?next=${encodeURIComponent(location.pathname + location.search)}" style="text-decoration:underline">Log in</a> or <a href="/subscribe" style="text-decoration:underline">subscribe</a> to read everything.</p>` : ''}
+          ${locked && user && !user.subscribed ? `<p class="notice" style="margin-top:1.3rem">🔒 Some chapters are for members only. <a href="/subscribe" style="text-decoration:underline">Subscribe from $2/month or 500 CFA</a> to unlock them.</p>` : ''}
+        </div>
+      </div>
+      <div class="sec-head"><h2 class="display">Chapters</h2></div>
+      <div class="chapters">${c.chapters.length ? c.chapters.slice().reverse().map(ch => `
+        <a class="chapter" href="/read?id=${ch.id}">
+          <div class="num">#${ch.number}</div>
+          <div class="t"><h4>${esc(ch.title)}${isNew(ch.createdAt) ? '<span class="mini new">New</span>' : ''}${ch.isFree ? '<span class="mini free">Free</span>' : ''}</h4>
+            <div class="sm">${fmtDate(ch.createdAt)}</div></div>
+          <span class="${ch.locked ? 'mini lock' : 'btn sm'}">${ch.locked ? '🔒 Members' : 'Read'}</span>
+        </a>`).join('') : '<div class="empty">No chapters uploaded yet.</div>'}
+      </div><div style="height:2rem"></div>`;
+  } catch (e) {
+    main.innerHTML = `<div class="empty" style="margin:5rem 0">${esc(e.message)} <br><br><a class="btn" href="/">Back home</a></div>`;
+  }
+})();
+</script>
+</body>
+</html>

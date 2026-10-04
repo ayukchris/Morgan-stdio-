@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reading · Morgan.stdio</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<nav id="nav"></nav>
+<div class="reader-bar hidden" id="bar"><div class="wrap">
+  <div style="min-width:0"><a id="backLink" class="muted" style="font-size:.85rem">← Back</a>
+    <div id="chTitle" style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center"><span class="muted hide-sm" id="pageInfo" style="font-size:.85rem"></span>
+    <a class="btn ghost sm" id="prevBtn">‹ Prev</a><a class="btn sm" id="nextBtn">Next ›</a></div>
+</div></div>
+<main id="main"><div class="spinner" style="margin:8rem auto"></div></main>
+<div class="wrap hidden" id="endNav" style="display:flex;justify-content:center;gap:1rem;margin-bottom:3rem"></div>
+<footer id="footer"></footer>
+
+<script src="/vendor/pdfjs/pdf.min.js"></script>
+<script src="/app.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
+(async () => {
+  const user = await boot();
+  const main = document.getElementById('main');
+  let ch;
+  try { ch = await api('/api/chapters/' + encodeURIComponent(qs('id'))); }
+  catch (e) { main.innerHTML = `<div class="wrap empty" style="margin:5rem auto">${esc(e.message)}<br><br><a class="btn" href="/">Back home</a></div>`; return; }
+
+  document.title = `${ch.comicTitle} Ch. ${ch.number} · Morgan.stdio`;
+  const bar = document.getElementById('bar'); bar.classList.remove('hidden');
+  document.getElementById('backLink').href = '/comic?id=' + ch.comicId;
+  document.getElementById('backLink').textContent = '← ' + ch.comicTitle;
+  document.getElementById('chTitle').textContent = `Chapter ${ch.number}: ${ch.title}`;
+  const navBtn = (el, id) => { if (id) el.href = '/read?id=' + id; else { el.removeAttribute('href'); el.style.opacity = .35; el.style.pointerEvents = 'none'; } };
+  navBtn(document.getElementById('prevBtn'), ch.prev);
+  navBtn(document.getElementById('nextBtn'), ch.next);
+
+  // ── Paywall ──
+  if (ch.locked) {
+    const next = encodeURIComponent(location.pathname + location.search);
+    main.innerHTML = `<div class="wrap"><div class="paywall panel halftone">
+      <div class="big">🔒</div>
+      <h1 class="display" style="font-size:2.6rem">Members Only Chapter</h1>
+      <p class="muted" style="margin:.6rem 0 1.6rem">Subscribe to read <b style="color:#fff">${esc(ch.comicTitle)}, Chapter ${ch.number}</b> and every other chapter on Morgan.stdio.</p>
+      <div style="display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap">
+        <a class="btn yellow" href="/subscribe?next=${next}">Subscribe · from $2 or 500 CFA</a>
+        ${!user ? `<a class="btn ghost" href="/login?next=${next}">I already have an account</a>` : ''}
+      </div></div></div>`;
+    return;
+  }
+
+  // ── Render PDF pages (vertical scroll, comic style) ──
+  main.innerHTML = `<div class="pages" id="pages"></div>`;
+  const pagesEl = document.getElementById('pages');
+  try {
+    const pdf = await pdfjsLib.getDocument({ url: `/api/chapters/${ch.id}/pdf`, httpHeaders: Auth.token ? { Authorization: 'Bearer ' + Auth.token } : {} }).promise;
+    document.getElementById('pageInfo').textContent = `${pdf.numPages} pages`;
+    const first = await pdf.getPage(1);
+    const vp1 = first.getViewport({ scale: 1 });
+    const ratio = vp1.height / vp1.width;
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const div = document.createElement('div');
+      div.className = 'page'; div.dataset.n = i;
+      div.style.aspectRatio = `1 / ${ratio}`;
+      div.innerHTML = `<span>Page ${i}</span>`;
+      pagesEl.appendChild(div);
+    }
+    const render = async div => {
+      if (div.dataset.done) return; div.dataset.done = 1;
+      const page = await pdf.getPage(+div.dataset.n);
+      const width = div.clientWidth || pagesEl.clientWidth;
+      const scale = (width * Math.min(window.devicePixelRatio || 1, 2)) / page.getViewport({ scale: 1 }).width;
+      const vp = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width; canvas.height = vp.height;
+      canvas.oncontextmenu = e => e.preventDefault();
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+      div.style.aspectRatio = ''; div.innerHTML = ''; div.appendChild(canvas);
+    };
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { render(e.target); io.unobserve(e.target); } }), { rootMargin: '1200px 0px' });
+    pagesEl.querySelectorAll('.page').forEach(p => io.observe(p));
+
+    // end-of-chapter navigation
+    const end = document.getElementById('endNav'); end.classList.remove('hidden');
+    end.innerHTML = `${ch.prev ? `<a class="btn ghost" href="/read?id=${ch.prev}">‹ Previous Chapter</a>` : ''}
+      ${ch.next ? `<a class="btn" href="/read?id=${ch.next}">Next Chapter ›</a>` : `<a class="btn ghost" href="/comic?id=${ch.comicId}">You're all caught up! Back to series</a>`}`;
+  } catch (e) {
+    main.innerHTML = `<div class="wrap empty" style="margin:5rem auto">Could not load this chapter. ${esc(e.message)}</div>`;
+  }
+
+  const prog = document.getElementById('progress');
+  addEventListener('scroll', () => { const h = document.documentElement; prog.style.width = (h.scrollTop / (h.scrollHeight - h.clientHeight) * 100) + '%'; });
+})();
+</script>
+</body>
+</html>

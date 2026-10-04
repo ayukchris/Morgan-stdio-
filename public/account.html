@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Account · Morgan.stdio</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav id="nav"></nav>
+<main class="wrap" style="max-width:820px;padding:3rem 0" id="main"></main>
+<footer id="footer"></footer>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  const u = await boot();
+  if (!u) return location.href = '/login?next=/account';
+  const main = document.getElementById('main');
+  const pays = await api('/api/me/payments');
+  const sub = u.subscription;
+  main.innerHTML = `
+    <h1 class="display" style="font-size:2.8rem">My Account</h1>
+    <p class="muted" style="margin-bottom:2rem">${esc(u.name)} · ${esc(u.email)}</p>
+
+    <div class="panel" style="margin-bottom:1.5rem">
+      <h2 style="font-size:1.2rem;margin-bottom:.8rem">Subscription</h2>
+      ${u.role === 'admin' ? `<p><span class="status active">Admin</span> You have full access to every comic. <a href="/admin" style="color:var(--yellow)">Open dashboard →</a></p>`
+        : u.subscribed ? `<p><span class="status active">Active</span> ${esc(sub.planName)} plan, valid until <b>${fmtDate(sub.expiresAt)}</b></p>
+             <a href="/subscribe" class="btn ghost sm" style="margin-top:1rem">Add more time</a>`
+        : `<p><span class="status none">Not subscribed</span> ${sub ? `Your plan ended on ${fmtDate(sub.expiresAt)}.` : 'Subscribe to unlock every chapter.'}</p>
+             <a href="/subscribe" class="btn yellow" style="margin-top:1rem">Subscribe · from $2 or 500 CFA</a>`}
+    </div>
+
+    ${u.role !== 'admin' ? `<div class="panel" style="margin-bottom:1.5rem">
+      <h2 style="font-size:1.2rem;margin-bottom:.8rem">Payment history</h2>
+      ${pays.length ? `<div class="table-wrap"><table><tr><th>Date</th><th>Plan</th><th>Method</th><th>Amount</th><th>Status</th></tr>
+        ${pays.map(p => `<tr><td>${fmtDate(p.createdAt)}</td><td>${esc(p.planName)}</td><td>${esc(p.methodName)}</td><td>${money(p.amount, p.currency)}</td><td><span class="status ${p.status}">${p.status}</span></td></tr>`).join('')}
+      </table></div>` : '<p class="muted">No payments yet.</p>'}
+    </div>` : ''}
+
+    <div class="panel">
+      <h2 style="font-size:1.2rem;margin-bottom:.8rem">Change password</h2>
+      <div id="pwMsg"></div>
+      <form id="pw"><div class="row">
+        <div class="field"><label>Current password</label><input type="password" name="current" required autocomplete="current-password"></div>
+        <div class="field"><label>New password</label><input type="password" name="newPassword" required minlength="6" autocomplete="new-password"></div>
+      </div><button class="btn">Update password</button></form>
+    </div>
+    <p style="margin-top:1.5rem"><a href="#" onclick="logout();return false" class="muted">Log out</a></p>`;
+
+  document.getElementById('pw').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, m = document.getElementById('pwMsg');
+    try { await api('/api/me/password', { body: { current: f.current.value, newPassword: f.newPassword.value } }); m.innerHTML = '<div class="success">Password updated.</div>'; f.reset(); }
+    catch (err) { m.innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+  };
+})();
+</script>
+</body>
+</html>

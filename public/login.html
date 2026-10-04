@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in · Morgan.stdio</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="halftone">
+<nav id="nav"></nav>
+<main class="wrap" style="max-width:460px;padding:3.5rem 0">
+  <div class="panel">
+    <div style="width:64px;margin:0 auto 1rem" id="logo"></div>
+    <div class="tabs" style="justify-content:center">
+      <button class="active" data-t="login">Log in</button>
+      <button data-t="register">Create account</button>
+    </div>
+    <div id="msg"></div>
+    <form id="form">
+      <div class="field hidden" id="nameField"><label>Your name</label><input type="text" name="name" autocomplete="name"></div>
+      <div class="field"><label>Email</label><input type="email" name="email" required autocomplete="email"></div>
+      <div class="field"><label>Password</label><input type="password" name="password" required minlength="6" autocomplete="current-password"></div>
+      <button class="btn block" id="submitBtn">Log in</button>
+    </form>
+    <p class="muted" style="text-align:center;font-size:.85rem;margin-top:1.2rem" id="hint">New here? Create a free account, then subscribe to unlock every chapter.</p>
+  </div>
+</main>
+<footer id="footer"></footer>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  document.getElementById('logo').innerHTML = LOGO_SVG;
+  const user = await boot();
+  const next = qs('next');
+  const go = u => location.href = next || (u.role === 'admin' ? '/admin' : u.subscribed ? '/' : '/subscribe');
+  if (user) return go(user);
+
+  let mode = qs('mode') === 'register' ? 'register' : 'login';
+  const form = document.getElementById('form'), msg = document.getElementById('msg');
+  const set = m => {
+    mode = m;
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.t === m));
+    document.getElementById('nameField').classList.toggle('hidden', m !== 'register');
+    form.name.required = m === 'register';
+    document.getElementById('submitBtn').textContent = m === 'register' ? 'Create account' : 'Log in';
+    form.password.autocomplete = m === 'register' ? 'new-password' : 'current-password';
+    msg.innerHTML = '';
+  };
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => set(b.dataset.t));
+  set(mode);
+
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = document.getElementById('submitBtn'); btn.disabled = true;
+    try {
+      const body = { email: form.email.value, password: form.password.value };
+      if (mode === 'register') body.name = form.name.value;
+      const r = await api('/api/' + mode, { body });
+      Auth.token = r.token;
+      go(r.user);
+    } catch (err) { msg.innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morgan.stdio · Read Comics Online</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav id="nav"></nav>
+<main>
+  <!-- NEW CHAPTER ADVERT BANNER -->
+  <section class="hero" id="hero"><div class="spinner" style="margin:12rem auto"></div></section>
+
+  <section class="block" id="latestSec">
+    <div class="wrap">
+      <div class="sec-head"><h2 class="display">🔥 Latest <span>Releases</span></h2><span class="muted">Newest chapters first</span></div>
+      <div class="strip" id="latest"></div>
+    </div>
+  </section>
+
+  <section class="block halftone" id="comics">
+    <div class="wrap">
+      <div class="sec-head"><h2 class="display">All <span>Comics</span></h2><span class="muted" id="comicCount"></span></div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </section>
+
+  <section class="block" id="joinSec">
+    <div class="wrap">
+      <div class="panel" style="display:flex;align-items:center;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;background:linear-gradient(120deg,#2a1020,#1b1b2e 55%,#10283a);">
+        <div>
+          <h2 class="display" style="font-size:2.3rem">Unlock every chapter</h2>
+          <p class="muted">Only <b style="color:#fff">$2/month</b>, <b style="color:#fff">$12/year</b>, or <b style="color:#fff">500 CFA/month</b> with MTN MoMo or Orange Money.</p>
+        </div>
+        <a href="/subscribe" class="btn yellow">See Plans →</a>
+      </div>
+    </div>
+  </section>
+</main>
+<footer id="footer"></footer>
+
+<script src="/app.js"></script>
+<script>
+(async () => {
+  const user = await boot();
+  if (user && user.subscribed) document.getElementById('joinSec').classList.add('hidden');
+
+  const [featured, latest, comics] = await Promise.all([api('/api/featured'), api('/api/latest'), api('/api/comics')]);
+
+  // ── Hero advert carousel (newest featured chapters first) ──
+  const hero = document.getElementById('hero');
+  if (!featured.length) {
+    hero.innerHTML = `<div class="hero-empty halftone"><div class="wrap">
+      <div style="width:110px;margin:0 auto 1rem">${LOGO_SVG}</div>
+      <h1 class="display">Morgan.stdio</h1>
+      <p class="muted" style="font-size:1.15rem;margin:.6rem 0 1.6rem">Original comics. New chapters every week.</p>
+      <a href="#comics" class="btn yellow">Browse Comics</a></div></div>`;
+  } else {
+    hero.innerHTML = `<div class="slides">${featured.map((ch, i) => `
+      <div class="slide ${i === 0 ? 'active' : ''}">
+        <div class="bg" style="${ch.banner ? `background-image:url('${esc(ch.banner)}')` : genCoverStyle(ch.comicTitle)}"></div>
+        <div class="wrap"><div class="content">
+          <span class="badge-new"><span class="dot"></span> ${i === 0 ? 'New Chapter Out Now' : 'New Chapter'}</span>
+          <h1 class="display">${esc(ch.comicTitle)}</h1>
+          <h2>Chapter ${ch.number}: ${esc(ch.title)} ${ch.isFree ? '<span class="mini free">Free</span>' : ''}</h2>
+          <p>${esc(ch.blurb)}</p>
+          <div class="actions">
+            <a href="/read?id=${ch.id}" class="btn">▶ Read Now</a>
+            <a href="/comic?id=${ch.comicId}" class="btn ghost">All Chapters</a>
+          </div>
+        </div></div>
+      </div>`).join('')}</div>
+      ${featured.length > 1 ? `<div class="dots"><div class="wrap">${featured.map((_, i) => `<button class="${i === 0 ? 'active' : ''}" data-i="${i}" aria-label="Slide ${i + 1}"></button>`).join('')}</div></div>` : ''}`;
+    const slides = hero.querySelectorAll('.slide'), dots = hero.querySelectorAll('.dots button');
+    let cur = 0, timer;
+    const go = i => { slides[cur].classList.remove('active'); dots[cur] && dots[cur].classList.remove('active'); cur = (i + slides.length) % slides.length; slides[cur].classList.add('active'); dots[cur] && dots[cur].classList.add('active'); };
+    const auto = () => { clearInterval(timer); if (slides.length > 1) timer = setInterval(() => go(cur + 1), 6000); };
+    dots.forEach(d => d.onclick = () => { go(+d.dataset.i); auto(); });
+    auto();
+
+    // ── Pop-up advert for the newest chapter (shown once per chapter) ──
+    const top = featured[0];
+    if (isNew(top.createdAt) && localStorage.getItem('ms_seen_popup') !== top.id) {
+      setTimeout(() => {
+        const m = document.createElement('div');
+        m.className = 'modal';
+        m.innerHTML = `<div class="box">
+          <button class="x" aria-label="Close">✕</button>
+          <div class="art" style="${top.banner ? `background-image:url('${esc(top.banner)}')` : genCoverStyle(top.comicTitle)}"><span class="badge-new"><span class="dot"></span> Just Released</span></div>
+          <div class="body">
+            <h2 class="display" style="font-size:2.2rem;line-height:1">${esc(top.comicTitle)}</h2>
+            <p style="color:var(--yellow);font-weight:700;margin:.3rem 0 .7rem">Chapter ${top.number}: ${esc(top.title)}</p>
+            <p class="muted" style="margin-bottom:1.3rem">${esc(top.blurb).slice(0, 180)}</p>
+            <a href="/read?id=${top.id}" class="btn block">▶ Read the New Chapter</a>
+          </div></div>`;
+        const close = () => { localStorage.setItem('ms_seen_popup', top.id); m.remove(); };
+        m.onclick = e => { if (e.target === m || e.target.classList.contains('x')) close(); };
+        m.querySelector('a').onclick = () => localStorage.setItem('ms_seen_popup', top.id);
+        document.body.appendChild(m);
+      }, 1200);
+    }
+  }
+
+  // ── Latest releases strip ──
+  const L = document.getElementById('latest');
+  if (!latest.length) document.getElementById('latestSec').classList.add('hidden');
+  L.innerHTML = latest.map(ch => `
+    <a class="chip" href="/read?id=${ch.id}">
+      ${ch.cover ? `<div class="thumb" style="background-image:url('${esc(ch.cover)}')"></div>` : `<div class="thumb" style="${genCoverStyle(ch.comicTitle)}"></div>`}
+      <div><h4>${esc(ch.comicTitle)}</h4>
+        <div class="sm">Ch. ${ch.number} · ${esc(ch.title)}</div>
+        <div class="sm" style="margin-top:.35rem">${isNew(ch.createdAt) ? '<span class="mini new" style="margin:0">New</span> ' : ''}${ch.isFree ? '<span class="mini free" style="margin:0">Free</span> ' : ch.locked ? '<span class="mini lock" style="margin:0">🔒 Members</span> ' : ''}${ago(ch.createdAt)}</div>
+      </div></a>`).join('');
+
+  // ── Comics grid ──
+  document.getElementById('comicCount').textContent = comics.length ? `${comics.length} series` : '';
+  document.getElementById('grid').innerHTML = comics.length ? comics.map(c => `
+    <a class="comic" href="/comic?id=${c.id}">
+      ${coverDiv('cover', c.cover, c.title)}
+      ${isNew(c.latestAt) && c.chapterCount ? '<span class="tag">New Ch.</span>' : ''}
+      ${c.genre ? `<span class="tag genre">${esc(c.genre)}</span>` : ''}
+      <div class="info"><h3>${esc(c.title)}</h3><div class="sm">${c.chapterCount} chapter${c.chapterCount === 1 ? '' : 's'}</div></div>
+    </a>`).join('') : `<div class="empty" style="grid-column:1/-1">No comics yet. Check back soon!</div>`;
+})();
+</script>
+</body>
+</html>

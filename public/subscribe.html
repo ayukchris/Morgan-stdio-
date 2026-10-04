@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscribe · Morgan.stdio</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav id="nav"></nav>
+<main class="wrap" style="padding:3rem 0 2rem">
+  <div style="text-align:center;margin-bottom:2.5rem">
+    <h1 class="display" style="font-size:clamp(2.6rem,6vw,4rem);text-shadow:4px 4px 0 #000">Unlock <span style="color:var(--yellow)">Every</span> Chapter</h1>
+    <p class="muted" style="font-size:1.1rem">Choose a plan. Pay with Mobile Money, card or PayPal. Cancel any time.</p>
+  </div>
+  <div id="status"></div>
+  <div class="plans" id="plans"><div class="spinner"></div></div>
+
+  <div class="panel hidden" id="payBox" style="margin-top:2rem;max-width:720px;margin-left:auto;margin-right:auto">
+    <h2 style="font-size:1.3rem">2. Choose how to pay</h2>
+    <div class="methods" id="methods"></div>
+    <div class="field hidden" id="phoneField"><label>Mobile Money number</label><input type="tel" id="phone" placeholder="e.g. 6 7X XX XX XX"></div>
+    <div id="payMsg"></div>
+    <button class="btn yellow block" id="payBtn">Pay</button>
+    <p class="muted" style="font-size:.82rem;text-align:center;margin-top:.8rem" id="modeNote"></p>
+  </div>
+</main>
+<footer id="footer"></footer>
+<script src="/app.js"></script>
+<script>
+const METHOD_STYLE = {
+  mtn: 'background:#ffcc00;color:#000', orange: 'background:#ff6600;color:#fff',
+  card: 'background:#1a1f71;color:#fff', paypal: 'background:#003087;color:#fff',
+};
+const METHOD_SHORT = { mtn: 'MTN', orange: 'OM', card: 'VISA', paypal: 'PP' };
+(async () => {
+  const user = await boot();
+  const { mode, plans, methods } = await api('/api/plans');
+  const next = qs('next');
+  let plan = null, method = null;
+
+  if (user && user.subscribed) {
+    document.getElementById('status').innerHTML = user.role === 'admin'
+      ? `<div class="success" style="text-align:center">You're the admin, so you can read everything already.</div>`
+      : `<div class="success" style="text-align:center">✅ You're a member until <b>${fmtDate(user.subscription.expiresAt)}</b>. Paying again will add more time.</div>`;
+  }
+
+  const perks = ['Every comic & chapter', 'New chapters as soon as they drop', 'Read on phone or computer'];
+  document.getElementById('plans').innerHTML = plans.map(p => `
+    <div class="plan" data-id="${p.id}">
+      ${p.badge ? `<span class="ribbon">${p.badge}</span>` : ''}
+      <h3>${p.name}</h3>
+      <div class="price">${p.label}<small> / ${p.per}</small></div>
+      <div class="muted" style="font-size:.88rem">${p.methods.map(m => methods[m].name).join(' · ')}</div>
+      <ul>${perks.map(x => `<li>${x}</li>`).join('')}</ul>
+      <button class="btn ${p.id === 'momo' ? 'yellow' : ''} block" style="margin-top:1.3rem">Choose ${p.name}</button>
+    </div>`).join('');
+
+  const payBox = document.getElementById('payBox');
+  document.querySelectorAll('.plan').forEach(el => el.onclick = () => {
+    if (!user) { location.href = '/login?mode=register&next=' + encodeURIComponent('/subscribe' + location.search); return; }
+    plan = plans.find(p => p.id === el.dataset.id); method = null;
+    document.querySelectorAll('.plan').forEach(x => x.classList.toggle('selected', x === el));
+    document.getElementById('methods').innerHTML = plan.methods.map(m => `
+      <div class="method" data-m="${m}"><span class="logo" style="${METHOD_STYLE[m]}">${METHOD_SHORT[m]}</span>${methods[m].name}</div>`).join('');
+    document.querySelectorAll('.method').forEach(mEl => mEl.onclick = () => {
+      method = mEl.dataset.m;
+      document.querySelectorAll('.method').forEach(x => x.classList.toggle('selected', x === mEl));
+      document.getElementById('phoneField').classList.toggle('hidden', !methods[method].needsPhone);
+    });
+    document.querySelector('.method').click();
+    document.getElementById('payBtn').textContent = `Pay ${money(plan.price, plan.currency)}`;
+    document.getElementById('payMsg').innerHTML = '';
+    payBox.classList.remove('hidden');
+    payBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  document.getElementById('modeNote').textContent = mode === 'demo'
+    ? '⚠️ Demo mode: no real money is charged. Real payments will be switched on soon.'
+    : '🔒 Secure payment.';
+
+  document.getElementById('payBtn').onclick = async () => {
+    const btn = document.getElementById('payBtn'), msg = document.getElementById('payMsg');
+    msg.innerHTML = ''; btn.disabled = true;
+    try {
+      const r = await api('/api/checkout', { body: { plan: plan.id, method, phone: document.getElementById('phone').value } });
+      if (r.mode === 'redirect') { location.href = r.url; return; }
+      // Demo checkout pop-up
+      const m = document.createElement('div'); m.className = 'modal';
+      m.innerHTML = `<div class="box"><div class="body" style="text-align:center">
+        <div style="font-size:3rem">💳</div>
+        <h2 class="display" style="font-size:2rem">Demo Payment</h2>
+        <p class="muted" style="margin:.5rem 0 1rem">${esc(plan.name)} plan · <b style="color:#fff">${money(plan.price, plan.currency)}</b> via ${esc(methods[method].name)}<br>Ref: ${esc(r.reference)}</p>
+        <div class="notice" style="margin-bottom:1.2rem">This is a test. No money will be taken. When real payments are connected, this step will open MTN MoMo, Orange Money, card or PayPal.</div>
+        <button class="btn yellow block" id="ok">✓ Simulate Successful Payment</button>
+        <button class="btn ghost block" id="cancel" style="margin-top:.6rem">Cancel</button></div></div>`;
+      document.body.appendChild(m);
+      m.querySelector('#cancel').onclick = () => { m.remove(); btn.disabled = false; };
+      m.querySelector('#ok').onclick = async () => {
+        try {
+          await api(`/api/checkout/${r.reference}/demo-confirm`, { method: 'POST' });
+          m.querySelector('.body').innerHTML = `<div style="font-size:3.5rem">🎉</div><h2 class="display" style="font-size:2.2rem">You're In!</h2>
+            <p class="muted" style="margin:.5rem 0 1.4rem">Your subscription is active. Enjoy every chapter!</p>
+            <a class="btn yellow block" href="${esc(next || '/')}">Start Reading →</a>`;
+        } catch (e) { toast(e.message, true); }
+      };
+    } catch (e) { msg.innerHTML = `<div class="error">${esc(e.message)}</div>`; btn.disabled = false; }
+  };
+})();
+</script>
+</body>
+</html>

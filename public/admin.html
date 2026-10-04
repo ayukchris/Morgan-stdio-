@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard · Morgan.stdio</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav id="nav"></nav>
+<main class="wrap" style="padding:2.5rem 0" id="main"><div class="spinner" style="margin:8rem auto"></div></main>
+<footer id="footer"></footer>
+<script src="/app.js"></script>
+<script>
+let comics = [];
+const $ = s => document.querySelector(s);
+
+(async () => {
+  const u = await boot();
+  if (!u) return location.href = '/login?next=/admin';
+  if (u.role !== 'admin') { $('#main').innerHTML = '<div class="empty" style="margin:5rem 0">Admins only.<br><br><a class="btn" href="/">Home</a></div>'; return; }
+
+  $('#main').innerHTML = `
+    <div class="sec-head"><div><h1 class="display" style="font-size:2.8rem">Admin Dashboard</h1><p class="muted">Upload comics, manage chapters and see your subscribers.</p></div>
+      <a href="/" class="btn ghost sm">View site →</a></div>
+    <div class="tabs">
+      <button data-tab="overview" class="active">📊 Overview</button>
+      <button data-tab="upload">⬆️ Upload Chapter</button>
+      <button data-tab="comics">📚 Comics</button>
+      <button data-tab="chapters">📄 Chapters</button>
+      <button data-tab="readers">👥 Subscribers</button>
+      <button data-tab="payments">💰 Payments</button>
+    </div>
+    <div id="tab"></div>`;
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => show(b.dataset.tab));
+  show(location.hash.slice(1) || 'overview');
+})();
+
+async function show(tab) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  history.replaceState(null, '', '#' + tab);
+  $('#tab').innerHTML = '<div class="spinner"></div>';
+  comics = await api('/api/comics');
+  try { await TABS[tab](); } catch (e) { $('#tab').innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+const TABS = {
+  async overview() {
+    const s = await api('/api/admin/stats');
+    const rev = Object.entries(s.revenue).map(([c, a]) => money(a, c)).join(' + ') || '$0';
+    $('#tab').innerHTML = `
+      ${s.mode === 'demo' ? `<div class="notice" style="margin-bottom:1.5rem">⚠️ <b>Payments are in demo mode.</b> Readers can test subscribing, but no real money is collected yet. Revenue below is test money only.</div>` : ''}
+      <div class="stats">
+        <div class="stat"><div class="n">${s.comics}</div><div class="l">Comics</div></div>
+        <div class="stat"><div class="n">${s.chapters}</div><div class="l">Chapters</div></div>
+        <div class="stat"><div class="n">${s.readers}</div><div class="l">Registered readers</div></div>
+        <div class="stat"><div class="n" style="color:var(--green)">${s.activeSubscribers}</div><div class="l">Active subscribers</div></div>
+        <div class="stat"><div class="n" style="color:var(--yellow);font-size:1.5rem;padding:.3rem 0">${rev}</div><div class="l">Revenue (${s.payments} payments)</div></div>
+      </div>
+      <div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+        <div><h3>Ready to post a new chapter?</h3><p class="muted">New chapters automatically appear first in the homepage banner and pop-up.</p></div>
+        <button class="btn yellow" onclick="show('upload')">⬆️ Upload Chapter</button>
+      </div>`;
+  },
+
+  async upload() {
+    if (!comics.length) {
+      $('#tab').innerHTML = `<div class="empty">First create a comic series, then you can upload its chapters.<br><br><button class="btn" onclick="show('comics')">+ Create a Comic</button></div>`;
+      return;
+    }
+    $('#tab').innerHTML = `<div class="panel" style="max-width:760px">
+      <h2 style="margin-bottom:1.2rem">Upload a new chapter (PDF)</h2>
+      <div id="upMsg"></div>
+      <form id="upForm">
+        <div class="row">
+          <div class="field"><label>Comic series</label><select name="comicId" required>${comics.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}</select></div>
+          <div class="field"><label>Chapter number</label><input type="number" name="number" min="1" step="any" placeholder="Auto"></div>
+        </div>
+        <div class="field"><label>Chapter title</label><input type="text" name="title" placeholder="e.g. The Awakening"></div>
+        <div class="field"><label>Short teaser (shown in the advert banner)</label><textarea name="blurb" rows="2" placeholder="One or two exciting sentences about this chapter"></textarea></div>
+        <div class="field"><label>Chapter PDF *</label><input type="file" name="pdf" accept="application/pdf,.pdf" required></div>
+        <div class="field"><label>Banner image (optional, wide image for the homepage advert. The comic cover is used if empty)</label><input type="file" name="banner" accept="image/*"></div>
+        <label class="check"><input type="checkbox" name="featured" checked> 📣 Advertise as a new chapter (homepage banner + pop-up)</label>
+        <label class="check"><input type="checkbox" name="isFree"> 🆓 Free chapter (anyone can read without subscribing)</label>
+        <div id="bar" class="hidden" style="height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:1rem 0"><div id="barIn" style="height:100%;width:0;background:var(--yellow);transition:width .2s"></div></div>
+        <button class="btn yellow" id="upBtn" style="margin-top:.6rem">⬆️ Upload Chapter</button>
+      </form></div>`;
+    const f = $('#upForm');
+    const suggest = () => { const c = comics.find(x => x.id === f.comicId.value); f.number.placeholder = c ? `Auto (${c.chapterCount + 1})` : 'Auto'; };
+    f.comicId.onchange = suggest; suggest();
+    f.onsubmit = e => {
+      e.preventDefault();
+      const fd = new FormData(f);
+      fd.set('featured', f.featured.checked); fd.set('isFree', f.isFree.checked);
+      if (!f.banner.files.length) fd.delete('banner');
+      const btn = $('#upBtn'); btn.disabled = true; btn.textContent = 'Uploading...';
+      $('#bar').classList.remove('hidden');
+      // XHR so we can show upload progress for big PDFs
+      const x = new XMLHttpRequest();
+      x.open('POST', '/api/admin/chapters');
+      x.setRequestHeader('Authorization', 'Bearer ' + Auth.token);
+      x.upload.onprogress = ev => { if (ev.lengthComputable) $('#barIn').style.width = (ev.loaded / ev.total * 100) + '%'; };
+      x.onload = () => {
+        let r = {}; try { r = JSON.parse(x.responseText); } catch (e) {}
+        btn.disabled = false; btn.textContent = '⬆️ Upload Chapter';
+        if (x.status >= 200 && x.status < 300) {
+          $('#upMsg').innerHTML = `<div class="success">✅ Uploaded <b>${esc(r.comicTitle)}, Chapter ${r.number}: ${esc(r.title)}</b>. <a href="/read?id=${r.id}" style="text-decoration:underline">Preview it</a></div>`;
+          f.reset(); $('#bar').classList.add('hidden'); $('#barIn').style.width = 0;
+          api('/api/comics').then(c => { comics = c; suggest(); });
+        } else { $('#upMsg').innerHTML = `<div class="error">${esc(r.error || 'Upload failed.')}</div>`; }
+      };
+      x.onerror = () => { btn.disabled = false; btn.textContent = '⬆️ Upload Chapter'; $('#upMsg').innerHTML = '<div class="error">Upload failed. Check your connection.</div>'; };
+      x.send(fd);
+    };
+  },
+
+  async comics() {
+    $('#tab').innerHTML = `
+      <div class="panel" style="max-width:760px;margin-bottom:2rem">
+        <h2 style="margin-bottom:1.2rem">+ Create a new comic series</h2>
+        <div id="cMsg"></div>
+        <form id="cForm">
+          <div class="row">
+            <div class="field"><label>Title *</label><input type="text" name="title" required></div>
+            <div class="field"><label>Genre</label><input type="text" name="genre" placeholder="Action, Romance, Fantasy..."></div>
+          </div>
+          <div class="field"><label>Description</label><textarea name="description" rows="3"></textarea></div>
+          <div class="field"><label>Cover image (portrait works best)</label><input type="file" name="cover" accept="image/*"></div>
+          <button class="btn">Create Comic</button>
+        </form>
+      </div>
+      <div class="grid">${comics.map(c => `
+        <div class="comic">
+          <a href="/comic?id=${c.id}">${coverDiv('cover', c.cover, c.title)}</a>
+          <div class="info"><h3>${esc(c.title)}</h3><div class="sm">${c.chapterCount} chapters</div>
+            <div style="display:flex;gap:.4rem;margin-top:.7rem;flex-wrap:wrap">
+              <button class="btn ghost sm" onclick="editComic('${c.id}')">Edit</button>
+              <button class="btn danger sm" onclick="delComic('${c.id}')">Delete</button>
+            </div></div>
+        </div>`).join('') || '<div class="empty" style="grid-column:1/-1">No comics yet.</div>'}</div>`;
+    $('#cForm').onsubmit = async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target); if (!e.target.cover.files.length) fd.delete('cover');
+      try { await api('/api/admin/comics', { body: fd }); toast('Comic created!'); show('comics'); }
+      catch (err) { $('#cMsg').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+    };
+  },
+
+  async chapters() {
+    const list = await api('/api/admin/chapters');
+    $('#tab').innerHTML = list.length ? `<div class="table-wrap"><table>
+      <tr><th>Comic</th><th>#</th><th>Title</th><th>Uploaded</th><th>Free</th><th>Advertise</th><th></th></tr>
+      ${list.map(ch => `<tr>
+        <td><b>${esc(ch.comicTitle)}</b></td><td>${ch.number}</td><td>${esc(ch.title)}</td>
+        <td class="muted">${fmtDate(ch.createdAt)}<br><span style="font-size:.78rem">${ch.size ? (ch.size / 1048576).toFixed(1) + ' MB' : ''}</span></td>
+        <td><label class="check" style="margin:0"><input type="checkbox" ${ch.isFree ? 'checked' : ''} onchange="patchCh('${ch.id}',{isFree:this.checked})"></label></td>
+        <td><label class="check" style="margin:0"><input type="checkbox" ${ch.featured ? 'checked' : ''} onchange="patchCh('${ch.id}',{featured:this.checked})"></label></td>
+        <td style="white-space:nowrap"><a class="btn ghost sm" href="/read?id=${ch.id}">Read</a> <button class="btn danger sm" onclick="delCh('${ch.id}')">Delete</button></td>
+      </tr>`).join('')}</table></div>` : `<div class="empty">No chapters yet. <br><br><button class="btn" onclick="show('upload')">Upload one</button></div>`;
+  },
+
+  async readers() {
+    const users = await api('/api/admin/users');
+    $('#tab').innerHTML = `
+      <p class="notice" style="margin-bottom:1.2rem">💡 If someone pays you directly (for example by MoMo transfer), click <b>+30 days</b> or <b>+1 year</b> to give them access by hand.</p>
+      ${users.length ? `<div class="table-wrap"><table>
+      <tr><th>Reader</th><th>Joined</th><th>Status</th><th>Expires</th><th>Give access</th></tr>
+      ${users.map(r => `<tr>
+        <td><b>${esc(r.name)}</b><br><span class="muted">${esc(r.email)}</span></td>
+        <td class="muted">${fmtDate(r.createdAt)}</td>
+        <td><span class="status ${r.subscribed ? 'active' : 'none'}">${r.subscribed ? 'Active' : 'None'}</span><br><span class="muted" style="font-size:.8rem">${r.subscription ? esc(r.subscription.planName) : ''}</span></td>
+        <td>${r.subscription ? fmtDate(r.subscription.expiresAt) : '-'}</td>
+        <td style="white-space:nowrap"><button class="btn ghost sm" onclick="grant('${r.id}',30)">+30 days</button> <button class="btn ghost sm" onclick="grant('${r.id}',365)">+1 year</button>
+          ${r.subscribed ? `<button class="btn danger sm" onclick="revoke('${r.id}')">Remove</button>` : ''}</td>
+      </tr>`).join('')}</table></div>` : '<div class="empty">No readers have signed up yet.</div>'}`;
+  },
+
+  async payments() {
+    const pays = await api('/api/admin/payments');
+    $('#tab').innerHTML = pays.length ? `<div class="table-wrap"><table>
+      <tr><th>Date</th><th>Reader</th><th>Plan</th><th>Method</th><th>Amount</th><th>Ref</th><th>Status</th></tr>
+      ${pays.map(p => `<tr><td class="muted">${fmtDate(p.createdAt)}</td><td>${esc(p.userEmail)}</td><td>${esc(p.planName)}</td>
+        <td>${esc(p.methodName)}${p.phone ? `<br><span class="muted" style="font-size:.8rem">${esc(p.phone)}</span>` : ''}</td>
+        <td><b>${money(p.amount, p.currency)}</b>${p.mode === 'demo' ? '<br><span class="muted" style="font-size:.75rem">demo</span>' : ''}</td>
+        <td class="muted" style="font-size:.8rem">${esc(p.reference)}</td><td><span class="status ${p.status}">${p.status}</span></td></tr>`).join('')}
+      </table></div>` : '<div class="empty">No payments yet.</div>';
+  },
+};
+
+async function patchCh(id, body) { try { await api('/api/admin/chapters/' + id, { method: 'PATCH', body }); toast('Saved'); } catch (e) { toast(e.message, true); } }
+async function delCh(id) { if (!confirm('Delete this chapter and its PDF? This cannot be undone.')) return; await api('/api/admin/chapters/' + id, { method: 'DELETE' }); toast('Chapter deleted'); show('chapters'); }
+async function delComic(id) { const c = comics.find(x => x.id === id); if (!confirm(`Delete "${c.title}" and ALL its chapters? This cannot be undone.`)) return; await api('/api/admin/comics/' + id, { method: 'DELETE' }); toast('Comic deleted'); show('comics'); }
+async function grant(id, days) { await api(`/api/admin/users/${id}/grant`, { body: { days } }); toast(`Access added: ${days} days`); show('readers'); }
+async function revoke(id) { if (!confirm('Remove this reader\'s subscription?')) return; await api(`/api/admin/users/${id}/revoke`, { method: 'POST' }); toast('Subscription removed'); show('readers'); }
+
+function editComic(id) {
+  const c = comics.find(x => x.id === id);
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="box"><button class="x">✕</button><div class="body">
+    <h2 style="margin-bottom:1rem">Edit comic</h2><div id="eMsg"></div>
+    <form id="eForm">
+      <div class="field"><label>Title</label><input type="text" name="title" value="${esc(c.title)}" required></div>
+      <div class="field"><label>Genre</label><input type="text" name="genre" value="${esc(c.genre)}"></div>
+      <div class="field"><label>Description</label><textarea name="description" rows="4">${esc(c.description)}</textarea></div>
+      <div class="field"><label>New cover image (optional)</label><input type="file" name="cover" accept="image/*"></div>
+      <button class="btn block">Save changes</button></form></div></div>`;
+  document.body.appendChild(m);
+  m.onclick = e => { if (e.target === m || e.target.classList.contains('x')) m.remove(); };
+  m.querySelector('form').onsubmit = async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target); if (!e.target.cover.files.length) fd.delete('cover');
+    try { await api('/api/admin/comics/' + id, { method: 'PUT', body: fd }); m.remove(); toast('Saved'); show('comics'); }
+    catch (err) { m.querySelector('#eMsg').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+  };
+}
+</script>
+</body>
+</html>
