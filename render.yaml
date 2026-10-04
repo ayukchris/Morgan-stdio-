@@ -1,0 +1,21 @@
+# One-click setup for Render.com (Blueprint)
+services:
+  - type: web
+    name: morgan-stdio
+    runtime: node
+    plan: starter            # $7/month, always on (free plan sleeps and loses files)
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DATA_DIR
+        value: /var/data     # comics, PDFs and accounts are saved here
+      - key: ADMIN_EMAIL
+        value: ayukchris8@gmail.com
+      - key: ADMIN_PASSWORD
+        sync: false          # Render will ask you to type it during setup
+      - key: PAYMENT_MODE
+        value: demo
+    disk:
+      name: morgan-data
+      mountPath: /var/data
+      sizeGB: 5              # about $1.25/month, holds lots of PDFs
